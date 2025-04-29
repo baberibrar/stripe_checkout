@@ -2,56 +2,9 @@ import React, { useState, useEffect } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import { useNavigate } from "react-router-dom";
 import "./App.css";
-import { makePayment } from "./stripe";
-
-// Directly define some sample products for testing
-const sampleProducts = [
-  {
-    id: "prod_1",
-    name: "Basic T-shirt",
-    description: "Comfortable cotton t-shirt",
-    price: 2000,
-    image: "https://i.imgur.com/EHyR2nP.png"
-  },
-  {
-    id: "prod_2",
-    name: "Premium Hoodie",
-    description: "Warm winter hoodie",
-    price: 4500,
-    image: "https://i.imgur.com/JrNrb0F.png"
-  },
-  {
-    id: "prod_3",
-    name: "Denim Jeans",
-    description: "Classic blue jeans",
-    price: 3500,
-    image: "https://i.imgur.com/tZGqFGt.png"
-  }
-];
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise = loadStripe(`${PUBLISHABLE_KEY}`);
-
-const ProductItem = ({ product, isSelected, onSelect }) => {
-  const formattedPrice = (product.price / 100).toFixed(2);
-  
-  return (
-    <div 
-      className={`product-item ${isSelected ? 'selected' : ''}`} 
-      onClick={() => onSelect(product)}
-    >
-      <div className="product-image">
-        <img src={product.image} alt={product.name} />
-        {isSelected && <span className="selected-badge">✓</span>}
-      </div>
-      <div className="product-info">
-        <h3>{product.name}</h3>
-        <p>{product.description}</p>
-        <p className="price">${formattedPrice}</p>
-      </div>
-    </div>
-  );
-};
 
 const Message = ({ message }) => (
   <section className="message-container">
@@ -60,7 +13,7 @@ const Message = ({ message }) => (
       className="back-button"
       onClick={() => window.location.href = '/'}
     >
-      Back to Shop
+      Back to Payment
     </button>
   </section>
 );
@@ -68,8 +21,7 @@ const Message = ({ message }) => (
 export default function App() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [products] = useState(sampleProducts);
-  const [selectedProducts, setSelectedProducts] = useState([]);
+  const [amount, setAmount] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -77,40 +29,36 @@ export default function App() {
     const query = new URLSearchParams(window.location.search);
 
     if (query.get("success")) {
-      setMessage("Order placed! You will receive an email confirmation.");
+      setMessage("Payment successful! You will receive an email confirmation.");
     }
 
     if (query.get("canceled")) {
       setMessage(
-        "Order canceled -- continue to shop around and checkout when you're ready."
+        "Payment canceled -- you can try again when you're ready."
       );
     }
   }, []);
 
-  const handleProductSelect = (product) => {
-    setSelectedProducts(prevSelected => {
-      // Check if the product is already selected
-      const isAlreadySelected = prevSelected.some(item => item.id === product.id);
-      
-      if (isAlreadySelected) {
-        // If already selected, remove it
-        return prevSelected.filter(item => item.id !== product.id);
-      } else {
-        // If not selected, add it
-        return [...prevSelected, { ...product, quantity: 1 }];
-      }
-    });
+  const handleAmountChange = (e) => {
+    // Only allow numeric input with up to 2 decimal places
+    const value = e.target.value;
+    if (value === "" || /^\d+(\.\d{0,2})?$/.test(value)) {
+      setAmount(value);
+    }
   };
 
   const handleCheckout = async () => {
-    if (selectedProducts.length === 0) {
-      alert("Please select at least one product");
+    if (!amount || parseFloat(amount) <= 0) {
+      alert("Please enter a valid amount greater than 0");
       return;
     }
 
     try {
       setIsLoading(true);
       const stripe = await stripePromise;
+
+      // Convert amount to cents (Stripe uses smallest currency unit)
+      const amountInCents = Math.round(parseFloat(amount) * 100);
 
       console.log('Sending checkout request to the server...');
       const response = await fetch('http://localhost:4242/api/create-checkout-session', {
@@ -120,7 +68,16 @@ export default function App() {
           'Accept': 'application/json',
         },
         body: JSON.stringify({
-          items: selectedProducts,
+          items: [
+            {
+              name: "Custom Payment",
+              description: "One-time payment",
+              price: amountInCents,
+              currency: "gbp",
+              tax_behavior: "exclusive",
+              quantity: 1
+            }
+          ],
         }),
       });
 
@@ -143,7 +100,6 @@ export default function App() {
       }
       
       // Fallback to redirectToCheckout if URL is not provided
-      // Redirect to Stripe Checkout
       console.log('Checkout session ID:', session.id);
       
       if (!session.id) {
@@ -166,61 +122,43 @@ export default function App() {
     }
   };
 
-  const calculateTotal = () => {
-    return selectedProducts.reduce((total, item) => {
-      return total + (item.price * (item.quantity || 1));
-    }, 0) / 100; // Convert cents to dollars
-  };
-
   return (
     <div className="App">
       <header className="App-header">
-        <h1>Shop Products</h1>
+        <h1>Payment Form</h1>
       </header>
       <main>
         {message ? (
           <Message message={message} />
         ) : (
-          <div className="product-container">
-            <div className="product-grid">
-              {products.map(product => (
-                <ProductItem 
-                  key={product.id} 
-                  product={product}
-                  isSelected={selectedProducts.some(item => item.id === product.id)}
-                  onSelect={handleProductSelect}
+          <div className="payment-container">
+            <div className="payment-form">
+              <h2>Enter Payment Amount</h2>
+              <div className="amount-input-container">
+                <span className="currency-symbol">£</span>
+                <input
+                  type="text"
+                  value={amount}
+                  onChange={handleAmountChange}
+                  placeholder="0.00"
+                  className="amount-input"
                 />
-              ))}
-            </div>
-            
-            {selectedProducts.length > 0 && (
-              <div className="checkout-panel">
-                <h3>Selected Products</h3>
-                <ul className="selected-list">
-                  {selectedProducts.map(product => (
-                    <li key={product.id}>
-                      {product.name} - ${(product.price / 100).toFixed(2)}
-                    </li>
-                  ))}
-                </ul>
-                <div className="total">
-                  <strong>Total: ${calculateTotal().toFixed(2)}</strong>
-                </div>
-                <button 
-                  className="checkout-button"
-                  onClick={handleCheckout}
-                >
-                  Proceed to Checkout
-                </button>
               </div>
-            )}
+              <button 
+                className="checkout-button"
+                onClick={handleCheckout}
+                disabled={!amount || parseFloat(amount) <= 0}
+              >
+                Pay Now
+              </button>
+            </div>
           </div>
         )}
       </main>
       {isLoading && (
         <div className="loading-overlay">
           <div className="spinner"></div>
-          <p>Processing your order...</p>
+          <p>Processing your payment...</p>
         </div>
       )}
     </div>

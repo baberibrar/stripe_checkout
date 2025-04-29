@@ -11,10 +11,7 @@ from flask_cors import CORS
 
 import stripe
 # This is your test secret API key.
-stripe.api_key = 'sk_test_51LNbBABYqXdhUoZaoBo2QHRJnn'
-
-# Import the products list from the products module
-from products import products
+stripe.api_key = 'sk_test_'
 
 app = Flask(__name__,
             static_url_path='',
@@ -32,56 +29,41 @@ def get_products():
 @app.route('/api/create-checkout-session', methods=['POST'])
 def create_checkout_session():
     try:
-        data = request.json
-
-        items = data.get('items', [])
+        data = request.get_json()
+        amount = data.get('amount', 0)
+        currency = data.get('currency', 'gbp')
+        submission_id = data.get('submission_id', None)
         
-        if not items:
-            return jsonify({"error": "No items selected"}), 400
-              line_items = []
+        if not amount:
+            return jsonify({"error": "No payment amount provided"}), 400
         
-        for item in items:
-            product_id = item.get('id')
-            quantity = item.get('quantity', 1)
-            # Find the product in our list
-            product = next((p for p in products if p['id'] == product_id), None)
-            
-            if not product:
-                return jsonify({"error": f"Product with ID {product_id} not found"}), 400
-            
-            # Directly use the product information for line_items without creating Product/Price objects
-            line_items.append({
-                'price_data': {
-                    'currency': 'usd',
-                    'unit_amount': product['price'],
-                    'product_data': {
-                        'name': product['name'],
-                        'description': product.get('description', ''),
-                        'images': [product.get('image')] if product.get('image') else []
-                    },
-                },
-                'quantity': quantity,
-            })
-            
-        # Create checkout session after processing all items
+        # Create checkout session with just the payment amount
         checkout_session = stripe.checkout.Session.create(
-            line_items=line_items,
+            payment_intent_data={
+                'description': 'Payment for submission ID: {}'.format(submission_id) if submission_id else 'Payment for custom service',
+            },
+            submit_type='pay',
             mode='payment',
             success_url="http://localhost:5173/success",
             cancel_url="http://localhost:5173/cancel",
             payment_method_types=['card'],
             billing_address_collection='auto',
+            line_items=[{
+                'price_data': {
+                    'currency': currency,
+                    'product_data': {
+                        'name': format('Payment for submission ID: {}', submission_id) if submission_id else 'Custom Service',
+                        'description': 'Payment for custom service',
+                    },
+                    'unit_amount': amount,
+                },
+                'quantity': 1,
+            }],
         )
-        print(f"Checkout session created: {checkout_session.id}")
-        return jsonify({
-            "id": checkout_session.id
-        })
+        
+        return jsonify({"id": checkout_session.id})
     except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({
-            "error": str(e),
-            "errorType": type(e).__name__
-        }), 400
+        return jsonify({"error": str(e)}), 400
 
 
 if __name__ == '__main__':
